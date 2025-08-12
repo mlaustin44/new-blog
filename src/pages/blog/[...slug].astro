@@ -1,0 +1,28 @@
+---
+import { getCollection } from "astro:content";
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getEntry } from "astro:content";
+
+const { slug } = Astro.params;
+
+if (!slug) {
+    return Astro.redirect('/404');
+}
+
+const post = await getEntry('blog', slug);
+
+if (!post) {
+    return Astro.redirect('/404');
+}
+
+const { Content } = await post.render();
+---
+
+<BaseLayout title={post.data.title}>
+    <article>
+        <h1>{post.data.title}</h1>
+        <time>{post.data.date.toLocaleDateString()}</time>
+        <Content />
+    </article>
+    <a href="/">Back to all posts</a>
+</BaseLayout>
