@@ -19,10 +19,93 @@ const { Content } = await post.render();
 ---
 
 <BaseLayout title={post.data.title}>
-    <article>
-        <h1>{post.data.title}</h1>
-        <time>{post.data.date.toLocaleDateString()}</time>
-        <Content />
-    </article>
-    <a href="/">Back to all posts</a>
+  <article class="blog-post">
+    <header class="post-header">
+      <h1>{post.data.title}</h1>
+      <div class="post-meta">
+        <time datetime={post.data.date.toISOString()}>
+          {post.data.date.toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric' 
+          })}
+        </time>
+        {post.data.tags && (
+          <>
+            <span class="separator">·</span>
+            <div class="post-tags">
+              {post.data.tags.map(tag => (
+                <span class="tag">{tag}</span>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </header>
+    
+    <div class="post-content">
+      <Content />
+    </div>
+    
+    <footer class="post-footer">
+      <a href="/" class="back-link">← Back to all posts</a>
+    </footer>
+  </article>
 </BaseLayout>
+
+<style>
+  .blog-post {
+    max-width: 100%;
+  }
+  
+  .post-header {
+    margin-bottom: 3rem;
+  }
+  
+  .post-header h1 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+  }
+  
+  .post-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-light);
+    font-size: 0.95rem;
+  }
+  
+  .separator {
+    color: var(--text-lighter);
+  }
+  
+  .post-tags {
+    display: flex;
+    gap: 0.5rem;
+  }
+  
+  .tag {
+    color: var(--text-light);
+  }
+  
+  .post-content {
+    font-size: 1.0625rem;
+    line-height: 1.8;
+  }
+  
+  .post-footer {
+    margin-top: 4rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+  
+  .back-link {
+    color: var(--text-light);
+    font-weight: 500;
+  }
+  
+  .back-link:hover {
+    color: var(--accent);
+    text-decoration: none;
+  }
+</style>

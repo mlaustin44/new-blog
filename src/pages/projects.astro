@@ -1,0 +1,68 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const projects = [
+    {
+        name: "Sample Project",
+        description: "Sample project description",
+        tech: ["C++", "NextJS"],
+        links: {
+            github: "https://github.com/...",
+            demo: "https://..."
+        }
+    },
+];
+---
+
+<BaseLayout title="Projects">
+    <h1>Projects</h1>
+
+    <div class="projects">
+        {projects.map(project => ( 
+            <article class="project">
+                <h2>{project.name}</h2>
+                <p>{project.description}</p>
+                <div class="links">
+                    { project.links.github && <a href={project.links.github}>Code</a> }
+                    { project.links.demo && <a href={project.links.demo}>Demo</a> }
+                </div>
+            </article>
+        ))}
+    </div>
+</BaseLayout>
+
+<style>
+    .projects {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+
+    .project {
+        padding: 1.5rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+    }
+
+    .project h2 {
+        margin-top: 0;
+    }
+
+    .tech {
+        display: flex;
+        gap: 0.5rem;
+        margin: 1rem 0
+    }
+
+    .tag {
+        padding: 0.25rem 0.75rem;
+        background: var(--bg-code);
+        border-radius: 999px;
+        font-size: 0.875rem;
+    }
+
+    .links {
+        display: flex;
+        gap: 1rem
+    }
+</style>
