@@ -3,12 +3,19 @@ import { defineConfig } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 import mdx from '@astrojs/mdx';
 import sitemap from '@astrojs/sitemap';
+import starlight from '@astrojs/starlight';
 
 export default defineConfig({
   output: 'server',
-  adapter: cloudflare({
-    mode: 'directory',
-  }),
-  integrations: [mdx(), sitemap()],
+  adapter: cloudflare(),
+  integrations: [
+    starlight({
+      title: 'Blog Components',
+      disable404Route: true,
+      customCss: ['./src/styles/starlight.css'],
+    }),
+    mdx(),
+    sitemap(),
+  ],
   site: 'https://matthewlaustin.com',
 });
