@@ -45,14 +45,17 @@ const {
     <style>
         :root {
             --max-width: 680px;
+        }
+
+        html:not(.dark) {
             --text: #2c2c2c;
             --text-light: #5a5a5a;
             --text-lighter: #888888;
             --bg: #fefefe;
             --bg-subtle: #f8f8f8;
             --border: #e8e8e8;
-            --accent: #0f172a;
-            --accent-hover: #1e293b;
+            --accent: #2563eb;
+            --accent-hover: #1d4ed8;
             --code-bg: #f5f5f5;
             --code-border: #e0e0e0;
         }
@@ -65,8 +68,8 @@ const {
                 --bg: #1a1a1a;
                 --bg-subtle: #252525;
                 --border: #3a3a3a;
-                --accent: #ff6b35;
-                --accent-hover: #ff8c66;
+                --accent: #fbbf24;
+                --accent-hover: #f59e0b;
                 --code-bg: #2a2a2a;
                 --code-border: #3a3a3a;
             }
@@ -79,8 +82,8 @@ const {
             --bg: #1a1a1a;
             --bg-subtle: #252525;
             --border: #3a3a3a;
-            --accent: #ff6b35;
-            --accent-hover: #ff8c66;
+            --accent: #fbbf24;
+            --accent-hover: #f59e0b;
             --code-bg: #2a2a2a;
             --code-border: #3a3a3a;
         }
@@ -173,14 +176,14 @@ const {
             color: var(--text);
         }
 
-        a {
-            color: var(--accent);
+        :global(a), :global(a:link), :global(a:visited) {
+            color: var(--accent) !important;
             text-decoration: none;
             transition: color 0.15s ease;
         }
 
-        a:hover {
-            color: var(--accent-hover);
+        :global(a:hover) {
+            color: var(--accent-hover) !important;
             text-decoration: underline;
         }
 
