@@ -1,0 +1,881 @@
+---
+title: "Django (DRF) vs The World, Part 1"
+summary: "Comparing Django to other Python frameworks (Flask and FastAPI), Go, and asp.net core for building a real-world sample app"
+date: 2025-08-12
+tags: ["django", "python", "api", "web-framework", "software", "go", "dotnet"]
+draft: true
+---
+
+# Django (DRF) vs The World, Part 1
+
+## The Concept and Background
+Even though I've used Python professionally (in the the sense that people have been giving me money for doing it) for going on a decade now, I came to Django quite late, and have only started learning it and using it in the last few months.  And it's been a process of going from "this seems really stupid, why would you do it this way?" and "where the heck is this behavior even written?" to finally getting it and realizing what a superpower having some many standard things just work with such simple code.
+
+People talk about Rails and Django as being convention over configuration, and that's true, but I think it's easier to explain as saying "django makes assumptions until you tell it not to".  
+
+---
+### One quick example
+If you create a standard DB model, and then put a `ModelViewSet` in front of it (if you're used to other frameworks, when you hear "view" think "controller" for now), you don't need to tell it you want any endpoints - you just get a complete set (GET - list, GET - single object, POST, PUT, PATCH, DELETE)...or you can use an `APIView` or `ViewSet`, which have you define every operation you want...or you can use any of the ~15 types in between which implement various more specific behaviors.
+
+Everything in Django feels like this to me - once you learn it's "magic" tools you realize they cover 80% of your use cases, so you only need to worry about implementing to 20% of stuff that's actually unique to your app.
+
+---
+
+So the concept for this series - I want to implement a real world peice of software that actually forces using most of the features you'd need in a web framework to let us compare Django to other options.  I went with the following contenders:
+- **Flask + SQLAlchemy**
+This was the original lightweight framework in Python, and it's hard to argue with how quickly you can build single endpoints in it
+- **FastAPI + SQLAlchemy**
+Feels like the current hotness in Python everyone has jumped to.  Built in OpenAPI docs and heavy pydantic/types integration.
+- **Go + gorm**
+Another popular stack, and also one that I've used on and off at work for a while.
+- **ASP.net Core**
+People in the startup world often discount .net, but I really thing they've hit a sweet spot with all the positives that have made Java so sucessful, but without all the baggage and complexity of Java and it's fragmented tooling.  Fair warning: this is the only stack here I don't personally know, so the C# examples will be LLM-generated, and I won't be able to speak to their correctness.
+
+## The Project: UniFi Controller as a Service
+
+I wanted to come up with a fairly simple business that still needed a reasonably complex SaaS tool.  We're going to build a simple platform that lets customers automatically spin up and administer Unifi controllers in the cloud.  The Unifi controller is a network application that provides management and monitoring of Unifi network gear, and as my house is networked with mostly Ubiquiti stuff, I know a bit about how the controller works.  We're building a toy version, but this is an actual business that exists in the real world.
+
+Ubiquiti provides <a href="https://help.ui.com/hc/en-us/articles/360012282453-Self-Hosting-a-UniFi-Network-Server"> instructions on how to self-host your controller on a linux server</a>.
+
+So we're going to build a service that 
+- Provisions Ubiquiti UniFi Controllers on-demand as DigitalOcean droplets
+- Controls to deploy and manage a controller
+- Payments through Stripe
+
+This is, to me, a great example, because we can start simple (just APIs to deploy and manage instances) but it gets complex quickly with stuff like authentication, payments, logging, background jobs, and DB management and migrations.
+
+## Step 1: The Basic CRUD API
+
+Let's start with creating and listing UniFi controller instances.
+
+### Django + Django REST Framework
+
+Some quick notes on Django and DRF, because some of the names will not be familiar:
+1. Since Django was originally a full stack framework, the handler for incoming HTTP requests (what you'd normally call a "controller") was always a view.  That convention carries through to DRF - even though the Views and Viewsets describe how to handle HTTP REST requests, they retain those names
+2. A serializer is a JSON\<->Django object converter
+3. A queryset is a lazy-evaluated SQL query built up using Django's ORM
+4. Each view (generally) works with a single model, and (generally) has a default serializer and queryset.  So it's common in Django to implement custom behavior by overriding the default serializer or queryset for a view.
+5. A `urls.py` is just a router - it tells you which URL endpoints should go to which views.  Since we know that many of your options for views automatically generate a bunch of endpoints, the urls are logically terser than in other frameworks - a single URL\<->View connection might actually imply 8 different endpoints.
+
+```python
+# models.py
+from django.db import models
+from django.contrib.auth.models import User
+
+class ControllerInstance(models.Model):
+    STATUS_CHOICES = [
+        ('provisioning', 'Provisioning'),
+        ('running', 'Running'),
+        ('stopped', 'Stopped'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='instances')
+    name = models.CharField(max_length=255)
+    droplet_id = models.CharField(max_length=100, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='provisioning')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+
+# serializers.py
+from rest_framework import serializers
+from .models import ControllerInstance
+
+class ControllerInstanceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ControllerInstance
+        fields = ['id', 'name', 'ip_address', 'status', 'created_at'] # which fields to include when we go from DRF to JSON
+        read_only_fields = ['ip_address', 'status', 'created_at'] # fields that we will throw when we recieve them as JSON
+
+# views.py
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from .models import ControllerInstance
+from .serializers import ControllerInstanceSerializer
+
+class ControllerInstanceViewSet(viewsets.ModelViewSet):
+    serializer_class = ControllerInstanceSerializer
+    
+    def get_queryset(self):
+        return self.request.user.instances.all()
+    
+    def perform_create(self, serializer):
+        instance = serializer.save(user=self.request.user)
+        # Trigger DO provisioning
+        provision_droplet.delay(instance.id)
+
+# urls.py
+from rest_framework.routers import DefaultRouter
+router = DefaultRouter()
+router.register('instances', ControllerInstanceViewSet, basename='instance')
+urlpatterns = router.urls
+```
+
+**Lines of code: ~50**
+**What we got for free:**
+- User model with password hashing
+- Database migrations
+- Admin interface
+- Browseable API
+- Input validation
+- Pagination
+- Filtering/Ordering
+- HTTP method routing
+- JSON serialization
+
+### FastAPI + SQLAlchemy
+
+```python
+# models.py
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
+from datetime import datetime
+
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True)
+    email = Column(String, unique=True, index=True)
+    hashed_password = Column(String)
+    instances = relationship("ControllerInstance", back_populates="user")
+
+class ControllerInstance(Base):
+    __tablename__ = "instances"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    droplet_id = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+    status = Column(String, default="provisioning")
+    user_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    user = relationship("User", back_populates="instances")
+
+# schemas.py
+from pydantic import BaseModel
+from datetime import datetime
+from typing import Optional
+
+class InstanceBase(BaseModel):
+    name: str
+
+class InstanceCreate(InstanceBase):
+    pass
+
+class Instance(InstanceBase):
+    id: int
+    ip_address: Optional[str]
+    status: str
+    created_at: datetime
+    
+    class Config:
+        orm_mode = True
+
+# database.py
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+engine = create_engine("postgresql://...")
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# main.py
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+
+app = FastAPI()
+
+@app.post("/instances/", response_model=Instance)
+def create_instance(
+    instance: InstanceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)  # We'll need to implement this
+):
+    db_instance = ControllerInstance(**instance.dict(), user_id=current_user.id)
+    db.add(db_instance)
+    db.commit()
+    db.refresh(db_instance)
+    # Trigger provisioning
+    background_tasks.add_task(provision_droplet, db_instance.id)
+    return db_instance
+
+@app.get("/instances/", response_model=List[Instance])
+def list_instances(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    instances = db.query(ControllerInstance).filter(
+        ControllerInstance.user_id == current_user.id
+    ).offset(skip).limit(limit).all()
+    return instances
+
+@app.get("/instances/{instance_id}", response_model=Instance)
+def get_instance(
+    instance_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    instance = db.query(ControllerInstance).filter(
+        ControllerInstance.id == instance_id,
+        ControllerInstance.user_id == current_user.id
+    ).first()
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+    return instance
+```
+
+**Lines of code: ~120**
+**What we had to build:**
+- User model from scratch
+- Password hashing (not shown)
+- Database session management
+- Pagination logic
+- Each HTTP endpoint manually
+- Relationship loading
+- 404 handling
+
+### Flask + SQLAlchemy
+
+```python
+# models.py
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+from werkzeug.security import generate_password_hash
+
+db = SQLAlchemy()
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200))
+    instances = db.relationship('ControllerInstance', backref='user', lazy=True)
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+class ControllerInstance(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    droplet_id = db.Column(db.String(100))
+    ip_address = db.Column(db.String(45))
+    status = db.Column(db.String(20), default='provisioning')
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+# app.py
+from flask import Flask, request, jsonify
+from flask_migrate import Migrate
+
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://...'
+db.init_app(app)
+migrate = Migrate(app, db)
+
+@app.route('/instances', methods=['GET'])
+@login_required  # We'll need to implement this
+def list_instances():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    
+    instances = ControllerInstance.query.filter_by(
+        user_id=current_user.id
+    ).paginate(page=page, per_page=per_page)
+    
+    return jsonify({
+        'instances': [
+            {
+                'id': i.id,
+                'name': i.name,
+                'ip_address': i.ip_address,
+                'status': i.status,
+                'created_at': i.created_at.isoformat()
+            }
+            for i in instances.items
+        ],
+        'total': instances.total,
+        'page': page,
+        'pages': instances.pages
+    })
+
+@app.route('/instances', methods=['POST'])
+@login_required
+def create_instance():
+    data = request.get_json()
+    
+    if not data.get('name'):
+        return jsonify({'error': 'Name is required'}), 400
+    
+    instance = ControllerInstance(
+        name=data['name'],
+        user_id=current_user.id
+    )
+    db.session.add(instance)
+    db.session.commit()
+    
+    # Queue provisioning task
+    provision_droplet.delay(instance.id)
+    
+    return jsonify({
+        'id': instance.id,
+        'name': instance.name,
+        'status': instance.status,
+        'created_at': instance.created_at.isoformat()
+    }), 201
+
+@app.route('/instances/<int:instance_id>', methods=['GET'])
+@login_required
+def get_instance(instance_id):
+    instance = ControllerInstance.query.filter_by(
+        id=instance_id,
+        user_id=current_user.id
+    ).first_or_404()
+    
+    return jsonify({
+        'id': instance.id,
+        'name': instance.name,
+        'ip_address': instance.ip_address,
+        'status': instance.status,
+        'created_at': instance.created_at.isoformat()
+    })
+```
+
+**Lines of code: ~100**
+**What we had to build:**
+- Manual JSON serialization
+- Input validation
+- Pagination logic
+- Error responses
+- Route decorators for each method
+
+### Go + GORM
+
+```go
+// models/models.go
+package models
+
+import (
+    "time"
+    "gorm.io/gorm"
+)
+
+type User struct {
+    ID           uint      `gorm:"primaryKey" json:"id"`
+    Email        string    `gorm:"uniqueIndex" json:"email"`
+    PasswordHash string    `json:"-"`
+    Instances    []Instance `json:"instances,omitempty"`
+    CreatedAt    time.Time `json:"created_at"`
+    UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type Instance struct {
+    ID         uint      `gorm:"primaryKey" json:"id"`
+    Name       string    `json:"name" binding:"required"`
+    DropletID  string    `json:"droplet_id,omitempty"`
+    IPAddress  string    `json:"ip_address,omitempty"`
+    Status     string    `json:"status" gorm:"default:provisioning"`
+    UserID     uint      `json:"user_id"`
+    User       User      `json:"-"`
+    CreatedAt  time.Time `json:"created_at"`
+    UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// handlers/instances.go
+package handlers
+
+import (
+    "net/http"
+    "strconv"
+    
+    "github.com/gin-gonic/gin"
+    "yourapp/models"
+    "yourapp/database"
+)
+
+func ListInstances(c *gin.Context) {
+    userID := c.GetUint("userID") // From auth middleware
+    page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+    limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+    offset := (page - 1) * limit
+    
+    var instances []models.Instance
+    var total int64
+    
+    database.DB.Model(&models.Instance{}).
+        Where("user_id = ?", userID).
+        Count(&total)
+    
+    database.DB.Where("user_id = ?", userID).
+        Limit(limit).
+        Offset(offset).
+        Order("created_at DESC").
+        Find(&instances)
+    
+    c.JSON(http.StatusOK, gin.H{
+        "instances": instances,
+        "total":     total,
+        "page":      page,
+        "limit":     limit,
+    })
+}
+
+func CreateInstance(c *gin.Context) {
+    userID := c.GetUint("userID")
+    
+    var input struct {
+        Name string `json:"name" binding:"required"`
+    }
+    
+    if err := c.ShouldBindJSON(&input); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+    }
+    
+    instance := models.Instance{
+        Name:   input.Name,
+        UserID: userID,
+        Status: "provisioning",
+    }
+    
+    if err := database.DB.Create(&instance).Error; err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create instance"})
+        return
+    }
+    
+    // Queue provisioning
+    go provisionDroplet(instance.ID)
+    
+    c.JSON(http.StatusCreated, instance)
+}
+
+func GetInstance(c *gin.Context) {
+    userID := c.GetUint("userID")
+    instanceID := c.Param("id")
+    
+    var instance models.Instance
+    result := database.DB.Where("id = ? AND user_id = ?", instanceID, userID).First(&instance)
+    
+    if result.Error != nil {
+        c.JSON(http.StatusNotFound, gin.H{"error": "Instance not found"})
+        return
+    }
+    
+    c.JSON(http.StatusOK, instance)
+}
+
+// main.go
+package main
+
+import (
+    "github.com/gin-gonic/gin"
+    "yourapp/handlers"
+    "yourapp/middleware"
+)
+
+func main() {
+    r := gin.Default()
+    
+    api := r.Group("/api")
+    api.Use(middleware.AuthRequired())
+    {
+        api.GET("/instances", handlers.ListInstances)
+        api.POST("/instances", handlers.CreateInstance)
+        api.GET("/instances/:id", handlers.GetInstance)
+    }
+    
+    r.Run(":8080")
+}
+```
+
+**Lines of code: ~150**
+**What we had to build:**
+- User model from scratch
+- Password handling
+- Pagination logic
+- JSON binding/validation
+- Error responses
+- Database queries
+
+### ASP.NET Core
+
+```csharp
+// Models/Models.cs
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+
+public class User
+{
+    public int Id { get; set; }
+    [Required, EmailAddress]
+    public string Email { get; set; }
+    public string PasswordHash { get; set; }
+    public List<ControllerInstance> Instances { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class ControllerInstance
+{
+    public int Id { get; set; }
+    [Required]
+    public string Name { get; set; }
+    public string DropletId { get; set; }
+    public string IpAddress { get; set; }
+    public string Status { get; set; } = "provisioning";
+    public int UserId { get; set; }
+    public User User { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+// Data/ApplicationDbContext.cs
+using Microsoft.EntityFrameworkCore;
+
+public class ApplicationDbContext : DbContext
+{
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : base(options) { }
+    
+    public DbSet<User> Users { get; set; }
+    public DbSet<ControllerInstance> Instances { get; set; }
+    
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.Email)
+            .IsUnique();
+    }
+}
+
+// Controllers/InstancesController.cs
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
+using System.Linq;
+using System.Threading.Tasks;
+
+[Authorize]
+[ApiController]
+[Route("api/[controller]")]
+public class InstancesController : ControllerBase
+{
+    private readonly ApplicationDbContext _context;
+    private readonly IBackgroundTaskQueue _taskQueue;
+    
+    public InstancesController(ApplicationDbContext context, IBackgroundTaskQueue taskQueue)
+    {
+        _context = context;
+        _taskQueue = taskQueue;
+    }
+    
+    [HttpGet]
+    public async Task<ActionResult> GetInstances(int page = 1, int pageSize = 20)
+    {
+        var userId = GetUserId(); // Helper to get user ID from claims
+        
+        var query = _context.Instances
+            .Where(i => i.UserId == userId)
+            .OrderByDescending(i => i.CreatedAt);
+        
+        var total = await query.CountAsync();
+        var instances = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(i => new 
+            {
+                i.Id,
+                i.Name,
+                i.IpAddress,
+                i.Status,
+                i.CreatedAt
+            })
+            .ToListAsync();
+        
+        return Ok(new 
+        {
+            instances,
+            total,
+            page,
+            pageSize
+        });
+    }
+    
+    [HttpPost]
+    public async Task<ActionResult> CreateInstance([FromBody] CreateInstanceDto dto)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+        
+        var instance = new ControllerInstance
+        {
+            Name = dto.Name,
+            UserId = GetUserId()
+        };
+        
+        _context.Instances.Add(instance);
+        await _context.SaveChangesAsync();
+        
+        // Queue background task
+        _taskQueue.QueueBackgroundWorkItem(async token =>
+        {
+            await ProvisionDroplet(instance.Id);
+        });
+        
+        return CreatedAtAction(nameof(GetInstance), new { id = instance.Id }, new
+        {
+            instance.Id,
+            instance.Name,
+            instance.Status,
+            instance.CreatedAt
+        });
+    }
+    
+    [HttpGet("{id}")]
+    public async Task<ActionResult> GetInstance(int id)
+    {
+        var userId = GetUserId();
+        var instance = await _context.Instances
+            .Where(i => i.Id == id && i.UserId == userId)
+            .Select(i => new 
+            {
+                i.Id,
+                i.Name,
+                i.IpAddress,
+                i.Status,
+                i.CreatedAt
+            })
+            .FirstOrDefaultAsync();
+        
+        if (instance == null)
+            return NotFound();
+        
+        return Ok(instance);
+    }
+}
+```
+
+**Lines of code: ~160**
+**What we had to build:**
+- User system from scratch
+- Background task queue
+- DTO classes
+- Manual mapping
+- Pagination logic
+
+## The Score After Round 1
+
+| Framework | Lines of Code | Built-in Features | Missing Pieces |
+|-----------|--------------|-------------------|----------------|
+| Django + DRF | ~50 | User model, migrations, admin, browseable API, validation, pagination | None for basic CRUD |
+| FastAPI | ~120 | Type hints, automatic docs | User model, auth, pagination, admin |
+| Flask | ~100 | Basic ORM integration | Everything else |
+| Go + Gin | ~150 | JSON binding | User model, migrations, admin |
+| ASP.NET Core | ~160 | Entity Framework, auth attributes | Admin, browseable API |
+
+### The Django Advantage Already Shows
+
+Look at what Django gave us in 50 lines:
+1. **A production-ready User model** with password hashing, sessions, and permissions
+2. **Automatic admin interface** - non-technical staff can manage data
+3. **Database migrations** that just work
+4. **Browseable API** for testing
+5. **ViewSets** that handle all HTTP methods with proper status codes
+
+The others? They're just getting started. FastAPI is closest, but still needs twice the code and lacks critical features.
+
+## Round 2: Adding Authentication
+
+Now let's add JWT authentication to each framework and see where complexity really starts to compound.
+
+### Django + DRF with Simple JWT
+
+```python
+# settings.py - just add to installed apps and configure
+INSTALLED_APPS = [
+    # ...
+    'rest_framework',
+    'rest_framework_simplejwt',
+]
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+}
+
+# urls.py - add token endpoints
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+)
+
+urlpatterns = [
+    path('api/token/', TokenObtainPairView.as_view()),
+    path('api/token/refresh/', TokenRefreshView.as_view()),
+    # ... your other URLs
+]
+
+# That's it! Your views are now protected
+```
+
+**Lines added: ~15**
+**What we got:**
+- JWT generation and validation
+- Token refresh flow
+- User registration can use Django's built-in
+- Password reset flow (Django built-in)
+- Rate limiting (just add throttle classes)
+
+### FastAPI - Building JWT from Scratch
+
+```python
+# auth.py
+from datetime import datetime, timedelta
+from typing import Optional
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
+
+SECRET_KEY = "your-secret-key"  # Should be in env vars
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+# main.py additions
+from fastapi.security import OAuth2PasswordRequestForm
+
+@app.post("/token")
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/register")
+async def register(email: str, password: str, db: Session = Depends(get_db)):
+    # Check if user exists
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create user
+    user = User(email=email, hashed_password=get_password_hash(password))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"email": user.email, "id": user.id}
+```
+
+**Lines added: ~100**
+**Still missing:**
+- Token refresh endpoint
+- Password reset flow
+- Email verification
+- Rate limiting
+- Session management
+
+### The Pattern Continues...
+
+I could show you Flask (install Flask-JWT-Extended, configure it, still build half yourself), Go (import a JWT library, write middleware, handle refresh tokens), and ASP.NET Core (add Identity, configure JWT Bearer, create token service), but the pattern is clear:
+
+**Django: Add package, configure, done.**
+**Others: Add package, build infrastructure, handle edge cases, test thoroughly.**
+
+## The Real Cost: When Requirements Change
+
+Here's where Django truly shines. Your PM walks in: "We need to add social login with Google and GitHub."
+
+### Django
+```python
+# pip install django-allauth
+INSTALLED_APPS += ['allauth', 'allauth.account', 'allauth.socialaccount', 
+                   'allauth.socialaccount.providers.google',
+                   'allauth.socialaccount.providers.github']
+# Configure in admin panel - done!
+```
+
+### Everyone Else
+Write OAuth flow, handle callbacks, store tokens, merge accounts, handle edge cases... 200+ lines of code.
+
+## Coming in Part 2
+
+We'll dive into:
+- Adding Stripe payments (Django: django-stripe, Others: Build everything)
+- Audit logging every user action (Django: django-simple-history, Others: Manual)
+- Background tasks for provisioning (Django: Celery integration built-in)
+- Handling database migrations when models change
+
+## The Lesson So Far
+
+That "simple" FastAPI starter that was "so much cleaner than Django"? It's now 3x the code and still missing features. That Go service that was "so fast"? You're spending all your time building infrastructure instead of business logic.
+
+Django's "batteries included" philosophy isn't about having everything - it's about having everything **work together**. The authentication system knows about the admin. The admin knows about your models. The models know about migrations. It's a coherent system, not a collection of libraries.
+
+Stay tuned for Part 2, where we'll add payments and watch the other frameworks struggle with webhook handling, idempotency, and subscription state machines while Django developers are already shipping features.

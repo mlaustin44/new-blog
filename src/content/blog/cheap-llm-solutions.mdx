@@ -1,0 +1,422 @@
+---
+title: "Automating Stupid Stuff with LLMs"
+summary: "Using cheap LLMs to validate and correct 500+ electronic components across multiple BOMs for a Make: Electronics kit"
+date: 2025-01-15
+tags: ["llm", "automation", "electronics", "api", "python", "digikey"]
+draft: true
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+
+# Automating Stupid Stuff with LLMs
+
+## The Problem
+
+I'm putting together an electronics kit for a friend who just moved from software to a hardware startup. She's working through "Make: Electronics" to better understand what her hardware engineers do, and I wanted to get her all the components in one go.
+
+I found BOMs online for the book's projects - over 500 parts across multiple lists. The descriptions were correct (LM317 voltage regulator, 2N3904 NPN transistor, etc.) but the actual DigiKey part numbers were a mess:
+- Invalid or discontinued part numbers
+- Surface mount parts where I needed through-hole
+- Expensive variants when cheaper options existed
+- Some cells had JSON blobs instead of part numbers
+
+Manually fixing this means searching each part on DigiKey, verifying stock, checking package type, and finding alternatives. That's a full day of tedious work.
+
+<Aside type="tip">
+The complete code is available at: https://gist.github.com/mlaustin44/e9baf84e8bf12a643bf078a0248f8749
+</Aside>
+
+## Tool Calling: Making LLMs Actually Useful
+
+### Background: Why Tool Calling Matters
+
+Tool calling (or function calling) is what transforms LLMs from impressive demos into actual solutions. On their own, LLMs are frozen in time - they only know what was in their training data, can't access real systems, and will confidently hallucinate facts. But give them the ability to call tools - to search APIs, run calculations, query databases - and they become orchestrators that combine their reasoning ability with real-world data.
+
+The pattern is simple but powerful: instead of asking an LLM to know something, you ask it to find out. Instead of "What's the DigiKey part number for an LM317?", you say "Here's a search API. Use it to find the right LM317." The LLM becomes the decision-maker that knows when and how to use tools, interprets results, and decides what to do next. This is how ChatGPT can browse the web, how Claude can run code, and how GitHub Copilot can search your codebase.
+
+## The LLM Setup: LiteLLM + OpenRouter
+
+I used LiteLLM instead of LangChain for a simple reason: this is a straightforward task that doesn't need LangChain's abstractions. LiteLLM just handles the API calls to different LLM providers with a unified interface:
+
+```python
+import litellm
+
+# Configure with OpenRouter
+litellm.api_key = os.getenv("OPENROUTER_API_KEY")
+MODEL = "openrouter/google/gemini-2.0-flash-exp:free"
+
+response = litellm.completion(
+    model=MODEL,
+    messages=[
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ],
+    temperature=0.1,  # Low temperature for consistency
+    max_tokens=500
+)
+```
+
+OpenRouter acts as a gateway to multiple LLM providers - you get one API key, one billing system, and access to models from OpenAI, Anthropic, Google, Meta, and others. For this task I mostly used:
+
+<CardGrid>
+  <Card title="Gemini 2.0 Flash" icon="star">
+    **Free tier** - Google offers this for free up to certain limits
+  </Card>
+  <Card title="AWS Nova Micro" icon="rocket">
+    **$0.075** per million input tokens
+  </Card>
+  <Card title="Gemini 1.5 Flash" icon="sparkles">
+    **$0.075** per million input tokens
+  </Card>
+</CardGrid>
+
+The total cost for processing 500+ parts twice (development and production runs): **$0.11**.
+
+## First Attempt: Web Scraping
+
+Started with BeautifulSoup to scrape DigiKey search results:
+
+```python
+def search_part(self, part_number: str):
+    url = f"https://www.digikey.com/en/products/result"
+    params = {'keywords': part_number}
+    response = self.session.get(url, params=params)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    rows = soup.find_all('tr', {'data-testid': 'table-row'})
+```
+
+This failed quickly. DigiKey's HTML structure wasn't consistent, and they have bot detection. Even with delays and proper headers, it was unreliable.
+
+## The Solution: DigiKey API + LLM
+
+DigiKey offers a free API with 1000 requests per day. You register at developer.digikey.com, create an app, and get credentials. The API returns structured JSON with everything you need:
+
+```json
+{
+    "DigiKeyPartNumber": "296-1395-5-ND",
+    "ProductDescription": "IC OPAMP GP 2 CIRCUIT 8DIP",
+    "QuantityAvailable": 47823,
+    "UnitPrice": 0.59,
+    "Packaging": {"Value": "Tube"},
+    "Parameters": [
+        {"Parameter": "Package / Case", "Value": "8-DIP"},
+        {"Parameter": "Mounting Type", "Value": "Through Hole"}
+    ]
+}
+```
+
+## How the Multi-Step Search Actually Works
+
+The most interesting part of this solution is how the LLM orchestrates multiple searches to find the right part. It's not just a single "validate this part" call - it's a conversation where the LLM can request searches and analyze results iteratively.
+
+### How Tool Calling Works in Practice
+
+In my implementation, I don't use any fancy framework features - just structured prompts that tell the LLM it can request actions:
+
+```python
+prompt = f"""
+You can request searches or make decisions. 
+
+To search DigiKey, return:
+{{"action": "search", "query": "your search terms"}}
+
+To make a final decision, return:
+{{"action": "decide", "verified_part_number": "the part number", ...}}
+
+You have {max_searches - search_num} searches remaining.
+"""
+```
+
+The LLM responds with JSON indicating what it wants to do. If it requests a search, I execute it and feed the results back:
+
+```python
+# Parse the LLM's response
+response = litellm.completion(model=MODEL, messages=[...])
+result = json.loads(response.choices[0].message.content)
+
+if result.get("action") == "search":
+    # LLM wants to search - execute the tool
+    query = result.get("query")
+    print(f"Search {search_num + 1}: {query}")
+    
+    # Call the actual DigiKey API
+    search_results = self.web_search.get_search_results(query)
+    
+    # Store results in history
+    search_history.append({
+        "query": query,
+        "full_results": search_results
+    })
+    
+    # Continue loop - next iteration will include these results
+    continue
+```
+
+### The Conversation Loop
+
+The key is that this is a conversation loop, not a single call. Each iteration includes all previous context:
+
+```python
+for search_num in range(max_searches):
+    # Build context with all previous searches
+    history_text = ""
+    if search_history:
+        history_text = "\nPrevious Search Results:\n"
+        for prev_search in search_history:
+            history_text += f"Query: '{prev_search['query']}'\n"
+            history_text += prev_search['full_results'] + "\n"
+    
+    # Add to prompt
+    prompt = f"""
+    Original Request: {part.description}
+    
+    {history_text}
+    
+    Based on the results above, what should we do next?
+    """
+```
+
+### Real Example: Finding an LM317
+
+Here's an actual trace of the LLM finding a replacement for an obsolete part:
+
+<Tabs>
+  <TabItem label="Turn 1">
+    ```json
+    LLM: {"action": "search", "query": "LM317TG-ND"}
+    API: No results found for 'LM317TG-ND'
+    ```
+  </TabItem>
+  <TabItem label="Turn 2">
+    ```json
+    LLM: {"action": "search", "query": "LM317 TO-220"}
+    API: DigiKey Search Results:
+    1. Part: LM317TGOS-ND
+       Description: IC REG LIN POS ADJ 1.5A TO220
+       Package: TO-220-3
+       Stock: 5,824
+       Price: $0.75
+
+    2. Part: LM317AHVT-ND  
+       Description: IC REG LIN POS ADJ 1.5A TO220
+       Package: TO-220-3
+       Stock: 2,166
+       Price: $1.93
+    ```
+  </TabItem>
+  <TabItem label="Turn 3">
+    ```json
+    LLM: {"action": "decide", 
+         "verified_part_number": "LM317TGOS-ND",
+         "notes": "Selected cheapest in-stock TO-220 variant"}
+    ```
+  </TabItem>
+</Tabs>
+
+The LLM understood that:
+1. The exact part didn't exist
+2. It should search for the base component (LM317) with the right package
+3. Given multiple options, pick the cheapest one
+
+### The Search Strategy Hierarchy
+
+The LLM learned to follow a consistent strategy pattern:
+
+1. **Exact match**: Try the original part number
+2. **Base part**: Remove suffixes (e.g., "LM317TG-ND" → "LM317")
+3. **Function search**: Search by what it does (e.g., "adjustable voltage regulator TO-220")
+4. **Broader category**: Most generic search (e.g., "voltage regulator through-hole")
+
+This mimics how a human would search - start specific, then broaden if needed.
+
+## Why Not Use LiteLLM's Built-in Tool Calling?
+
+LiteLLM does support OpenAI-style function calling:
+
+```python
+# The "proper" way with LiteLLM
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "search_digikey",
+        "description": "Search DigiKey for parts",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"}
+            },
+            "required": ["query"]
+        }
+    }
+}]
+
+response = litellm.completion(
+    model=MODEL,
+    messages=messages,
+    tools=tools,
+    tool_choice="auto"
+)
+```
+
+So why did I use structured JSON prompts instead? A few reasons:
+
+<Aside type="caution">
+Not all models support function calling. Many cheaper models - particularly Google's Gemini Flash free tier - don't support the function calling API.
+</Aside>
+
+### 1. Model Compatibility
+
+With structured prompts, any model that can output JSON works:
+
+```python
+# Works with ANY model
+prompt = "Return JSON: {\"action\": \"search\", \"query\": \"...\"}"
+```
+
+### 2. More Control
+
+With my approach, I can have explicit states and enforce constraints:
+
+```python
+{
+    "action": "search",    # Need more info
+    "action": "decide",    # Ready to choose
+    "action": "give_up"    # No solution exists
+}
+```
+
+### 3. Cost and Flexibility
+
+Same code works across all providers without worrying about their function calling implementation:
+
+```python
+MODEL = "openrouter/google/gemini-2.0-flash-exp:free"  # Free!
+MODEL = "openrouter/anthropic/claude-3-haiku"         # Works!
+MODEL = "local/llama2"                                # Also works!
+```
+
+## The Prompt Engineering
+
+The key to making this work is being explicit about requirements in the prompt:
+
+```python
+prompt = f"""
+CRITICAL REQUIREMENTS (in priority order):
+1. MUST be DIP/Through-Hole package (NO surface mount)
+   - Valid: DIP, PDIP, TO-92, TO-220, TO-18, Radial, Axial
+   - INVALID: SOIC, TSSOP, QFN, SOT, SMD, SMT
+
+2. MUST be IN STOCK (stock qty > 0)
+
+3. MUST match the component function
+   - If original is "LM358 Op-Amp", replacement must be an op-amp
+   - If original is "2N2222 NPN", replacement must be NPN transistor
+
+4. Choose the CHEAPEST option that meets above criteria
+
+Search results:
+{search_results}
+
+Return JSON with your decision.
+"""
+```
+
+The prompt has to be specific about package types because the LLM needs to understand electronics packaging. A "SOIC-8" might sound similar to "DIP-8" but one is surface mount and one is through-hole.
+
+## Handling Edge Cases
+
+The script handles several real-world messiness issues:
+
+<Tabs>
+  <TabItem label="JSON Cleanup">
+    ```python
+    # Some cells contained: 
+    # {'part_number': 'LM7805CT', 'digikey_part_number': '296-1387-5-ND'}
+    if part_str.startswith('{'):
+        import ast
+        data = ast.literal_eval(part_str)
+        return data.get('digikey_part_number', '')
+    ```
+  </TabItem>
+  <TabItem label="Package Validation">
+    ```python
+    def _is_through_hole(self, product: Dict) -> bool:
+        package = product.get('Packaging', {}).get('Value', '').upper()
+        
+        # Check parameters for mounting type
+        for param in product.get('Parameters', []):
+            if 'MOUNTING TYPE' in param.get('Parameter', '').upper():
+                if 'THROUGH HOLE' in param.get('Value', '').upper():
+                    return True
+                if 'SURFACE MOUNT' in param.get('Value', '').upper():
+                    return False
+        
+        # Fall back to package name matching
+        th_indicators = ['DIP', 'PDIP', 'TO-92', 'TO-220']
+        return any(ind in package for ind in th_indicators)
+    ```
+  </TabItem>
+  <TabItem label="Rate Limiting">
+    ```python
+    except litellm.exceptions.RateLimitError:
+        print(f"Rate limit hit, waiting 5 seconds...")
+        time.sleep(5)
+        return self.verify_part_with_llm(part)  # Retry
+    ```
+  </TabItem>
+</Tabs>
+
+### Preventing Infinite Loops
+
+One problem I hit early was the LLM requesting the same search repeatedly. The fix was twofold:
+
+```python
+# 1. Check for duplicate searches
+if any(s['query'] == query for s in search_history):
+    print(f"⚠ Duplicate search detected, forcing decision...")
+    result = {"action": "decide", "verified_part_number": "NOT FOUND"}
+
+# 2. Show the LLM what it already searched
+prompt += f"\nPrevious searches performed: {[s['query'] for s in search_history]}"
+prompt += "\nIMPORTANT: Don't repeat the same search query"
+```
+
+## Results
+
+Across 2 BOMs totaling 500+ parts:
+
+<CardGrid>
+  <Card title="289 Validated" icon="check">
+    Parts verified as-is with correct part numbers
+  </Card>
+  <Card title="163 Replaced" icon="random">
+    Found better alternatives (cheaper or actually in stock)
+  </Card>
+  <Card title="48 Failed" icon="x">
+    No through-hole equivalent exists (mostly ferrite beads)
+  </Card>
+</CardGrid>
+
+**Total costs:**
+- LLM API calls: $0.11 for all 500+ parts
+- DigiKey API calls: ~400 (well under the 1000/day free limit)
+- Development time: ~3 hours while multitasking
+- BOM savings: ~30% due to finding cheaper alternatives
+
+The final CSVs uploaded to DigiKey without errors.
+
+## Key Takeaways
+
+1. **LiteLLM + OpenRouter is a great combination for prototyping.** You can switch between models with one line of code and only pay for what you use.
+
+2. **Multi-step tool use patterns work well.** Instead of one complex prompt, let the LLM iterate with multiple searches. It's like having a conversation with someone who's searching DigiKey for you.
+
+3. **The DigiKey API is excellent.** Free tier is generous, returns structured data, and actually works (unlike scraping).
+
+4. **Domain-specific prompts matter.** The LLM needs to understand the difference between DIP-8 and SOIC-8, or it will suggest surface mount parts.
+
+5. **Tool calling doesn't need to be complex.** Sometimes structured JSON prompts are better than "proper" function calling, especially when optimizing for cost and compatibility.
+
+At current prices (sub-$0.001 per part), any BOM validation task is worth automating. The pattern extends to any vendor with an API - Mouser, Arrow, Newark all have similar APIs. This same approach - giving LLMs the ability to make multiple tool calls based on results - is incredibly powerful and underused. It turns a simple validation script into something that can handle the messy reality of electronic component sourcing.
