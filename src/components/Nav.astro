@@ -1,4 +1,6 @@
 ---
+import ThemeIcon from './ThemeIcon.astro';
+
 const currentPath = Astro.url.pathname;
 
 const links = [
@@ -22,6 +24,7 @@ const links = [
                 {link.label}
             </a>
         ))}
+        <ThemeIcon />
     </div>
 </nav>
 

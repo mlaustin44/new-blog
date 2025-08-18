@@ -1,1 +1,44 @@
 /* Minimal Starlight customization for blog components */
+
+/* Code block customizations */
+.expressive-code {
+  /* Make code blocks wider than text content */
+  width: calc(100% + 2rem);
+  margin-left: -1rem;
+  margin-right: -1rem;
+}
+
+/* Show horizontal scrollbar on code blocks */
+.expressive-code pre {
+  overflow-x: auto !important;
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: #666 #333; /* Firefox */
+}
+
+/* Webkit browsers (Chrome, Safari) scrollbar styling */
+.expressive-code pre::-webkit-scrollbar {
+  height: 8px;
+}
+
+.expressive-code pre::-webkit-scrollbar-track {
+  background: #333;
+  border-radius: 4px;
+}
+
+.expressive-code pre::-webkit-scrollbar-thumb {
+  background: #666;
+  border-radius: 4px;
+}
+
+.expressive-code pre::-webkit-scrollbar-thumb:hover {
+  background: #888;
+}
+
+/* Responsive adjustments for code blocks */
+@media (max-width: 768px) {
+  .expressive-code {
+    width: calc(100% + 1rem);
+    margin-left: -0.5rem;
+    margin-right: -0.5rem;
+  }
+}

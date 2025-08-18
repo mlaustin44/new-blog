@@ -13,6 +13,12 @@ export default defineConfig({
       title: 'Blog Components',
       disable404Route: true,
       customCss: ['./src/styles/starlight.css'],
+      expressiveCode: {
+        themes: ['dark-plus'],
+        defaultProps: {
+          frame: false,
+        },
+      },
     }),
     mdx(),
     sitemap(),

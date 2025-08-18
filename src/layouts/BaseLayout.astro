@@ -32,7 +32,7 @@ const { title, description = "Matthew Austin's Blog" } = Astro.props;
         }
 
         @media (prefers-color-scheme: dark) {
-            :root {
+            :root:not(.light) {
                 --text: #e8e8e8;
                 --text-light: #b8b8b8;
                 --text-lighter: #888888;
@@ -45,6 +45,20 @@ const { title, description = "Matthew Austin's Blog" } = Astro.props;
                 --code-border: #3a3a3a;
             }
         }
+
+        html.dark {
+            --text: #e8e8e8;
+            --text-light: #b8b8b8;
+            --text-lighter: #888888;
+            --bg: #1a1a1a;
+            --bg-subtle: #252525;
+            --border: #3a3a3a;
+            --accent: #ff6b35;
+            --accent-hover: #ff8c66;
+            --code-bg: #2a2a2a;
+            --code-border: #3a3a3a;
+        }
+
 
         * {
             margin: 0;
@@ -71,6 +85,25 @@ const { title, description = "Matthew Austin's Blog" } = Astro.props;
             max-width: var(--max-width);
             margin: 0 auto;
             padding: 0 2rem;
+        }
+
+        /* Responsive text width breakpoints */
+        @media (min-width: 1024px) {
+            :root {
+                --max-width: 800px;
+            }
+        }
+
+        @media (min-width: 1280px) {
+            :root {
+                --max-width: 900px;
+            }
+        }
+
+        @media (min-width: 1536px) {
+            :root {
+                --max-width: 1000px;
+            }
         }
 
         header {
@@ -197,6 +230,7 @@ const { title, description = "Matthew Austin's Blog" } = Astro.props;
         pre.astro-code.github-dark[style] {
             font-size: 0.8rem !important;
             line-height: 1.4 !important;
+            padding: 1rem;
         }
         
         pre.astro-code.github-dark[style] * {
