@@ -18,11 +18,24 @@ if (!post) {
 const { Content } = await post.render();
 ---
 
-<BaseLayout title={post.data.title}>
+<BaseLayout 
+  title={post.data.title}
+  description={post.data.summary}
+  type="article"
+  author={post.data.author}
+  publishedTime={post.data.date}
+  tags={post.data.tags}
+>
   <article class="blog-post">
     <header class="post-header">
       <h1>{post.data.title}</h1>
       <div class="post-meta">
+        {post.data.author && (
+          <>
+            <span class="author">By {post.data.author}</span>
+            <span class="separator">·</span>
+          </>
+        )}
         <time datetime={post.data.date.toISOString()}>
           {post.data.date.toLocaleDateString('en-US', { 
             year: 'numeric', 
@@ -82,6 +95,11 @@ const { Content } = await post.render();
   .post-tags {
     display: flex;
     gap: 0.5rem;
+  }
+  
+  .author {
+    color: var(--text-light);
+    font-weight: 500;
   }
   
   .tag {
