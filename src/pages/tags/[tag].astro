@@ -1,0 +1,200 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const { tag } = Astro.params;
+
+if (!tag) {
+  return Astro.redirect('/tags');
+}
+
+// Get all posts and filter by tag
+const allPosts = await getCollection('blog', (post) => !post.data.draft);
+const posts = allPosts.filter(post => post.data.tags?.includes(tag));
+
+// If no posts found for this tag, redirect to tags page
+if (posts.length === 0) {
+  return Astro.redirect('/tags');
+}
+
+const postCount = posts.length;
+---
+
+<BaseLayout title={`Posts tagged "${tag}"`} description={`All posts tagged with ${tag} on Matthew Austin's blog`}>
+  <div class="tag-page">
+    <header class="tag-header">
+      <h1>Posts tagged <span class="tag-name">"{tag}"</span></h1>
+      <p class="post-count">{postCount} post{postCount !== 1 ? 's' : ''} found</p>
+    </header>
+    
+    <div class="posts-list">
+      {posts.map(post => (
+        <article class="post-preview">
+          <h2 class="post-title">
+            <a href={`/blog/${post.slug}/`}>{post.data.title}</a>
+          </h2>
+          <div class="post-meta">
+            {post.data.author && (
+              <>
+                <span class="author">By {post.data.author}</span>
+                <span class="separator">·</span>
+              </>
+            )}
+            <time datetime={post.data.date.toISOString()}>
+              {post.data.date.toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              })}
+            </time>
+          </div>
+          {post.data.summary && (
+            <p class="post-summary">{post.data.summary}</p>
+          )}
+          <div class="post-tags">
+            {post.data.tags?.map(postTag => (
+              <a href={`/tags/${postTag}/`} class="tag-link" class:list={{ active: postTag === tag }}>
+                {postTag}
+              </a>
+            ))}
+          </div>
+        </article>
+      ))}
+    </div>
+    
+    <footer class="page-footer">
+      <a href="/tags/" class="back-link">← View all tags</a>
+      <a href="/" class="back-link">← Back to posts</a>
+    </footer>
+  </div>
+</BaseLayout>
+
+<style>
+  .tag-page {
+    max-width: 100%;
+  }
+  
+  .tag-header {
+    margin-bottom: 3rem;
+  }
+  
+  .tag-header h1 {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+  }
+  
+  .tag-name {
+    color: var(--accent);
+  }
+  
+  .post-count {
+    color: var(--text-light);
+    font-size: 1rem;
+  }
+  
+  .posts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3rem;
+  }
+  
+  .post-preview {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 2rem;
+  }
+  
+  .post-preview:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  
+  .post-title {
+    margin: 0 0 0.75rem 0;
+    font-size: 1.5rem;
+  }
+  
+  .post-title a {
+    color: var(--text);
+    text-decoration: none;
+  }
+  
+  .post-title a:hover {
+    color: var(--accent);
+  }
+  
+  .post-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-light);
+    font-size: 0.95rem;
+    margin-bottom: 1rem;
+  }
+  
+  .author {
+    font-weight: 500;
+  }
+  
+  .separator {
+    color: var(--text-lighter);
+  }
+  
+  .post-summary {
+    margin: 1rem 0;
+    color: var(--text-light);
+    line-height: 1.6;
+  }
+  
+  .post-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+  
+  .tag-link {
+    background: var(--bg-subtle);
+    color: var(--text-light);
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 0.875rem;
+    transition: all 0.15s ease;
+  }
+  
+  .tag-link:hover {
+    background: var(--accent);
+    color: white;
+    text-decoration: none;
+  }
+  
+  .tag-link.active {
+    background: var(--accent);
+    color: white;
+  }
+  
+  .page-footer {
+    margin-top: 4rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 2rem;
+  }
+  
+  .back-link {
+    color: var(--text-light);
+    font-weight: 500;
+  }
+  
+  .back-link:hover {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  
+  @media (max-width: 640px) {
+    .page-footer {
+      flex-direction: column;
+      gap: 1rem;
+    }
+  }
+</style>

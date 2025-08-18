@@ -1,0 +1,128 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+// Get all posts and extract tags
+const posts = await getCollection('blog', (post) => !post.data.draft);
+const allTags = posts.flatMap(post => post.data.tags || []);
+
+// Count posts per tag
+const tagCounts = allTags.reduce((acc, tag) => {
+  acc[tag] = (acc[tag] || 0) + 1;
+  return acc;
+}, {} as Record<string, number>);
+
+// Sort tags by frequency, then alphabetically
+const sortedTags = Object.entries(tagCounts)
+  .sort(([a, countA], [b, countB]) => {
+    if (countB !== countA) return countB - countA; // Sort by count descending
+    return a.localeCompare(b); // Then alphabetically
+  });
+---
+
+<BaseLayout title="All Tags" description="Browse all topics and tags on Matthew Austin's blog">
+  <div class="tags-page">
+    <header class="tags-header">
+      <h1>All Tags</h1>
+      <p class="tags-description">
+        Explore posts by topic. Click on any tag to see all related posts.
+      </p>
+    </header>
+    
+    <div class="tags-grid">
+      {sortedTags.map(([tag, count]) => (
+        <a href={`/tags/${tag}/`} class="tag-card">
+          <h3 class="tag-name">{tag}</h3>
+          <p class="tag-count">{count} post{count !== 1 ? 's' : ''}</p>
+        </a>
+      ))}
+    </div>
+    
+    <footer class="page-footer">
+      <a href="/" class="back-link">← Back to all posts</a>
+    </footer>
+  </div>
+</BaseLayout>
+
+<style>
+  .tags-page {
+    max-width: 100%;
+  }
+  
+  .tags-header {
+    margin-bottom: 3rem;
+  }
+  
+  .tags-header h1 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+  }
+  
+  .tags-description {
+    color: var(--text-light);
+    font-size: 1.125rem;
+    line-height: 1.6;
+  }
+  
+  .tags-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 4rem;
+  }
+  
+  .tag-card {
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-decoration: none;
+    color: var(--text);
+    transition: all 0.15s ease;
+  }
+  
+  .tag-card:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    text-decoration: none;
+  }
+  
+  .tag-name {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+  
+  .tag-count {
+    margin: 0;
+    color: var(--text-light);
+    font-size: 0.875rem;
+  }
+  
+  .tag-card:hover .tag-count {
+    color: rgba(255, 255, 255, 0.8);
+  }
+  
+  .page-footer {
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+  
+  .back-link {
+    color: var(--text-light);
+    font-weight: 500;
+  }
+  
+  .back-link:hover {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  
+  @media (max-width: 640px) {
+    .tags-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
