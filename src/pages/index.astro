@@ -1,131 +1,83 @@
 ---
-import { getCollection } from "astro:content";
-import BaseLayout from "../layouts/BaseLayout.astro";
+import Base from '../layouts/Base.astro';
+import Catalog from '../components/Catalog.svelte';
+import { site } from '../site';
+import { KINDS, KIND_IDS, getEntries, toRow } from '../lib/entries';
 
-const posts = await getCollection('blog', ({ data }) => {
-	return data.draft !== true;
-})
+// How many rows each group shows before "All N".
+const PREVIEW = { work: 3, writing: 5, projects: 3 };
 
-posts.sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+const groups = await Promise.all(
+  KIND_IDS.map(async (id) => {
+    const rows = (await getEntries(id)).map(toRow);
+    return {
+      id,
+      label: KINDS[id].label,
+      href: `/${id}/`,
+      total: rows.length,
+      preview: PREVIEW[id],
+      rows,
+    };
+  }),
+);
 ---
 
-<BaseLayout title="Blog">
+<Base>
   <section class="hero">
-    <p class="subtitle">
-      Software engineering, electronics, mechanical things, and anything else that interests me.
-    </p>
+    <h1>{site.headline}</h1>
+    <p>{site.intro}</p>
+    <ul>
+      {site.links.map((link) => <li><a href={link.href}>{link.label}</a></li>)}
+    </ul>
   </section>
-  
-  <div class="posts">
-    {posts.map(post => (
-      <article class="post-entry">
-        <time datetime={post.data.date.toISOString()}>
-          {post.data.date.toLocaleDateString('en-US', { 
-            year: 'numeric', 
-            month: 'short', 
-            day: 'numeric' 
-          })}
-        </time>
-        <h2>
-          <a href={`/blog/${post.slug}`}>{post.data.title}</a>
-        </h2>
-        {post.data.summary && (
-          <p class="summary">{post.data.summary}</p>
-        )}
-        {post.data.tags && (
-          <div class="tags">
-            {post.data.tags.map(tag => (
-              <span class="tag">{tag}</span>
-            ))}
-          </div>
-        )}
-      </article>
-    ))}
-  </div>
-</BaseLayout>
+  <Catalog client:load groups={groups} />
+</Base>
 
 <style>
   .hero {
-    margin-bottom: 2rem;
-    padding: 0 0 2rem 0;
-    border-bottom: 1px solid var(--border);
-    text-align: center;
-  }
-  
-  .subtitle {
-    font-size: 1.25rem;
-    color: var(--text);
-    margin: 0 auto;
-    max-width: 600px;
-    font-style: italic;
-    line-height: 1.6;
-  }
-  
-  .posts {
     display: flex;
     flex-direction: column;
+    gap: 1.25rem;
+    padding-block: 5.5rem 5rem;
   }
-  
-  .post-entry {
-    padding: 2rem 0;
-    border-bottom: 1px solid var(--border);
+
+  h1 {
+    margin: 0;
+    max-width: 47.5rem;
+    font-weight: 800;
+    font-size: clamp(2rem, 4vw, 3.125rem);
+    line-height: 1.06;
+    letter-spacing: -0.028em;
   }
-  
-  .post-entry:last-child {
-    border-bottom: none;
+
+  p {
+    margin: 0;
+    max-width: 35rem;
+    font-size: 1.1875rem;
+    line-height: 1.55;
+    color: var(--muted);
   }
-  
-  .post-entry time {
-    display: block;
-    color: var(--text-lighter);
-    font-size: 0.875rem;
-    font-weight: 500;
-    margin-bottom: 0.5rem;
-    letter-spacing: 0.025em;
-    text-transform: uppercase;
-  }
-  
-  .post-entry h2 {
-    margin: 0 0 0.75rem 0;
-    font-size: 1.5rem;
-    line-height: 1.4;
-  }
-  
-  .post-entry h2 a {
-    color: var(--text);
-    transition: color 0.15s ease;
-  }
-  
-  .post-entry h2 a:hover {
-    color: var(--accent);
-    text-decoration: none;
-  }
-  
-  .summary {
-    margin: 0.75rem 0 1rem 0;
-    color: var(--text-light);
-    font-size: 1rem;
-    line-height: 1.6;
-  }
-  
-  .tags {
+
+  ul {
     display: flex;
-    gap: 0.75rem;
     flex-wrap: wrap;
-  }
-  
-  .tag {
-    display: inline-block;
-    padding: 0.25rem 0.625rem;
-    background: var(--bg-subtle);
-    color: var(--text-light);
-    font-size: 0.8125rem;
+    gap: 0 1.375rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.96875rem;
     font-weight: 500;
-    border-radius: 4px;
-    transition: all 0.15s ease;
   }
-  
-  .tag:hover {
-    background: var(--border);
+
+  li a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  @media (max-width: 40rem) {
+    .hero {
+      padding-block: 3rem 2.5rem;
+    }
   }
 </style>

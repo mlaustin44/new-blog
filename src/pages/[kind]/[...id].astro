@@ -1,0 +1,309 @@
+---
+import { render } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import {
+  KINDS,
+  entryHref,
+  entryNo,
+  getAllEntries,
+  isoDate,
+  readingMinutes,
+  related,
+  revisedDate,
+  tagHref,
+  wordCount,
+  type Entry,
+} from '../../lib/entries';
+
+export async function getStaticPaths() {
+  const all = await getAllEntries();
+  return all.map((entry) => ({
+    params: { kind: entry.collection, id: entry.id },
+    props: { entry, all },
+  }));
+}
+
+interface Props {
+  entry: Entry;
+  all: Entry[];
+}
+
+const { entry, all } = Astro.props;
+const { Content, headings } = await render(entry);
+
+const kind = KINDS[entry.collection];
+const no = entryNo(entry);
+const revised = revisedDate(entry);
+const contents = headings.filter(
+  (heading) => heading.depth === 2 && heading.slug !== 'footnote-label',
+);
+const goesWith = related(entry, all);
+
+// Everything in the specifications box is derived; none of it is typed by hand.
+const facts: { label: string; value: string }[] = [];
+if (entry.collection === 'work') {
+  if (entry.data.role) facts.push({ label: 'Role', value: entry.data.role });
+  if (entry.data.company) facts.push({ label: 'Company', value: entry.data.company });
+  if (entry.data.period) facts.push({ label: 'Period', value: entry.data.period });
+}
+if (entry.collection === 'projects') facts.push({ label: 'Status', value: entry.data.status });
+facts.push({ label: 'Published', value: isoDate(entry.data.date) });
+if (revised) facts.push({ label: 'Revised', value: isoDate(revised) });
+facts.push({
+  label: 'Length',
+  value: `${readingMinutes(entry)} min · ${wordCount(entry).toLocaleString('en-US')} words`,
+});
+---
+
+<Base title={entry.data.title} description={entry.data.summary} section={entry.collection} wide>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href="/">Everything</a>
+    <span aria-hidden="true">/</span>
+    <a href={`/${entry.collection}/`}>{kind.label}</a>
+    <span aria-hidden="true">/</span>
+    <span class="here">{no}</span>
+  </nav>
+
+  <article class="entry">
+    <header class="head">
+      {entry.data.draft && <p class="draft">Draft · not in the published site</p>}
+      <h1>{entry.data.title}</h1>
+      {entry.data.summary && <p class="summary">{entry.data.summary}</p>}
+    </header>
+
+    <aside class="specs" aria-label="About this entry">
+      <h2>Specifications</h2>
+      <dl>
+        <div><dt>Entry</dt><dd class="mono">{no}</dd></div>
+        <div><dt>Kind</dt><dd>{kind.label}</dd></div>
+        {
+          entry.data.tags.length > 0 && (
+            <div>
+              <dt>Subject</dt>
+              <dd class="tags">{entry.data.tags.map((tag) => <a href={tagHref(tag)}>{tag}</a>)}</dd>
+            </div>
+          )
+        }
+        {facts.map((fact) => <div><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
+      </dl>
+      {
+        contents.length > 1 && (
+          <nav class="contents" aria-label="On this page">
+            <h2 class="label">On this page</h2>
+            <ul>
+              {contents.map((heading) => <li><a href={`#${heading.slug}`}>{heading.text}</a></li>)}
+            </ul>
+          </nav>
+        )
+      }
+    </aside>
+
+    <div class="prose">
+      <Content />
+    </div>
+
+    {
+      goesWith.length > 0 && (
+        <aside class="more" aria-label="Related entries">
+          <h2 class="label">Goes with</h2>
+          <ul>
+            {goesWith.map((other) => (
+              <li>
+                <a href={entryHref(other)}>
+                  <span class="mono">{entryNo(other)}</span>
+                  <span class="other-title">{other.data.title}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </aside>
+      )
+    }
+  </article>
+</Base>
+
+<style>
+  .crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.625rem;
+    padding-block: 0.375rem;
+    border-block: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--muted);
+  }
+
+  .crumbs a {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
+  }
+
+  .crumbs .here {
+    color: var(--ink);
+  }
+
+  .entry {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+    padding-block: 2.5rem 4.5rem;
+  }
+
+  .head {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  h1 {
+    margin: 0;
+    font-weight: 800;
+    font-size: clamp(2.125rem, 3.9vw, 3.125rem);
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+  }
+
+  .summary {
+    margin: 0;
+    font-size: 1.3125rem;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+
+  .draft {
+    align-self: flex-start;
+    margin: 0;
+    padding: 0.125rem 0.5rem;
+    border: 1px dashed var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+
+  .specs,
+  .more {
+    font-size: 0.90625rem;
+  }
+
+  .specs {
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+  }
+
+  .specs > h2 {
+    margin: 0 0 -1.75rem;
+    padding: 0.4375rem 0.625rem;
+    background: var(--mark);
+    color: var(--mark-ink);
+    font-size: 0.9375rem;
+    font-weight: 800;
+  }
+
+  dl {
+    margin: 0;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  dl > div {
+    display: grid;
+    grid-template-columns: 6rem minmax(0, 1fr);
+    border-top: 1px solid var(--rule);
+  }
+
+  dl > div:first-child {
+    border-top: 0;
+  }
+
+  dt {
+    padding: 0.4375rem 0.625rem;
+    color: var(--muted);
+  }
+
+  dd {
+    margin: 0;
+    padding: 0.4375rem 0;
+  }
+
+  dd.tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.625rem;
+  }
+
+  .contents {
+    display: none;
+  }
+
+  .label {
+    padding-bottom: 0.375rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .contents ul,
+  .more ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .contents li a,
+  .more li a {
+    display: flex;
+    align-items: center;
+    min-height: 40px;
+    padding-block: 0.5rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .more li a {
+    align-items: baseline;
+    gap: 0.75rem;
+    text-decoration: none;
+  }
+
+  .more .mono {
+    flex: none;
+  }
+
+  .other-title {
+    font-weight: 600;
+  }
+
+  @media (min-width: 60rem) {
+    .entry {
+      grid-template-columns: minmax(0, 720px) minmax(0, 300px);
+      grid-template-rows: auto auto 1fr;
+      justify-content: space-between;
+      column-gap: 4rem;
+    }
+
+    .head {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .prose {
+      grid-column: 1;
+      grid-row: 2 / span 2;
+    }
+
+    .specs {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      align-self: start;
+    }
+
+    .more {
+      grid-column: 2;
+      grid-row: 3;
+      align-self: start;
+    }
+
+    .contents {
+      display: block;
+    }
+  }
+</style>

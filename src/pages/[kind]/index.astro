@@ -1,0 +1,30 @@
+---
+import Base from '../../layouts/Base.astro';
+import EntryList from '../../components/EntryList.svelte';
+import { KINDS, KIND_IDS, getEntries, toRow, type Kind } from '../../lib/entries';
+
+export function getStaticPaths() {
+  return KIND_IDS.map((kind) => ({ params: { kind } }));
+}
+
+const kind = Astro.params.kind as Kind;
+const { label, blurb } = KINDS[kind];
+const rows = (await getEntries(kind)).map(toRow);
+---
+
+<Base title={label} description={blurb} section={kind}>
+  <header class="page-head">
+    <h1>{label}</h1>
+    <p>{blurb}</p>
+  </header>
+  <div class="list">
+    {rows.length > 0 ? <EntryList rows={rows} summaries /> : <p class="empty">Nothing published here yet.</p>}
+  </div>
+</Base>
+
+<style>
+  .list {
+    padding-bottom: 5.5rem;
+    border-top: 2px solid var(--ink);
+  }
+</style>

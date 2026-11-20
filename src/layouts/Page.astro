@@ -1,0 +1,27 @@
+---
+// Layout for standalone Markdown pages in src/pages (the about page).
+import Base from './Base.astro';
+
+interface Props {
+  frontmatter: { title: string; description?: string; lede?: string; section?: string };
+}
+
+const { frontmatter } = Astro.props;
+---
+
+<Base title={frontmatter.title} description={frontmatter.description} section={frontmatter.section}>
+  <header class="page-head">
+    <h1>{frontmatter.title}</h1>
+    {frontmatter.lede && <p>{frontmatter.lede}</p>}
+  </header>
+  <div class="prose body">
+    <slot />
+  </div>
+</Base>
+
+<style>
+  .body {
+    max-width: 42rem;
+    padding-bottom: 5rem;
+  }
+</style>

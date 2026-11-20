@@ -1,0 +1,70 @@
+---
+import { site } from '../site';
+import { KINDS, KIND_IDS } from '../lib/entries';
+
+interface Props {
+  section?: string;
+}
+
+const { section } = Astro.props;
+const links = [
+  ...KIND_IDS.map((id) => ({ id: id as string, label: KINDS[id].label, href: `/${id}/` })),
+  { id: 'about', label: 'About', href: '/about/' },
+];
+---
+
+<header class="site-header">
+  <a class="name" href="/">{site.name}</a>
+  <nav aria-label="Site">
+    {
+      links.map((link) => (
+        <a href={link.href} aria-current={section === link.id ? 'page' : undefined}>
+          {link.label}
+        </a>
+      ))
+    }
+  </nav>
+</header>
+
+<style>
+  .site-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem 1.5rem;
+    padding-block: 1rem;
+  }
+
+  a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    text-decoration: none;
+  }
+
+  .name {
+    font-weight: 800;
+    font-size: 1.25rem;
+    letter-spacing: -0.015em;
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    margin-inline: -0.75rem;
+    font-size: 0.96875rem;
+    font-weight: 500;
+  }
+
+  nav a {
+    padding-inline: 0.75rem;
+  }
+
+  nav a[aria-current='page'] {
+    font-weight: 700;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 6px;
+  }
+</style>

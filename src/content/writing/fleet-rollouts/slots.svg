@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 260" width="720" height="260" font-family="system-ui, sans-serif" font-size="15">
+  <rect width="720" height="260" fill="#ffffff"/>
+  <g fill="none" stroke="#18201d" stroke-width="1.5">
+    <rect x="30" y="95" width="150" height="70"/>
+    <rect x="300" y="30" width="390" height="80"/>
+    <rect x="300" y="150" width="390" height="80" stroke-dasharray="6 5"/>
+    <path d="M180 118 H240 V70 H292"/>
+    <path d="M180 142 H240 V190 H292" stroke-dasharray="6 5"/>
+  </g>
+  <g fill="#18201d">
+    <path d="M300 70 l-10 -5 v10 z"/>
+    <path d="M300 190 l-10 -5 v10 z"/>
+    <text x="105" y="126" text-anchor="middle" font-weight="700">Bootloader</text>
+    <text x="105" y="147" text-anchor="middle" font-size="13">picks a slot</text>
+    <text x="320" y="64" font-weight="700">Slot A · active</text>
+    <text x="320" y="88" font-size="13">Known-good image. Left untouched during an update.</text>
+    <text x="320" y="184" font-weight="700">Slot B · idle</text>
+    <text x="320" y="208" font-size="13">Receives the update. Booted only after a health check.</text>
+  </g>
+  <rect x="300" y="30" width="8" height="80" fill="#ffd60a" stroke="#18201d" stroke-width="1.5"/>
+</svg>
